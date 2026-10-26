@@ -1,0 +1,28 @@
+# ResNet1D-LSTM training config (core model, DESIGN.md §3.3.5, §4).
+
+model_name: resnet1d_lstm
+
+model_params:
+  in_channels: 9
+  num_classes: 6
+  channels: [64, 128, 256]
+  blocks_per_stage: 2
+  strides: [1, 2, 2]
+  stem_channels: 64
+  kernel_size: 3
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+
+data:
+  val_ratio: 0.2
+
+training:
+  epochs: 30
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 0.0001
+  lr_factor: 0.5
+  lr_patience: 5
+
+seed: 42

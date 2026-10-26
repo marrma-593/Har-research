@@ -1,0 +1,15 @@
+/data/
+
+# model weights (large binaries)
+/checkpoints/*.pt
+
+# generated result artifacts
+/results/*.json
+/results/*.txt
+
+# training logs
+/logs/
+
+# python caches
+__pycache__/
+*.pyc

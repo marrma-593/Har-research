@@ -1,0 +1,31 @@
+# ResNet1D-TCN training config (DESIGN.md §3.3.7, §4).
+
+model_name: resnet1d_tcn
+
+model_params:
+  in_channels: 9
+  num_classes: 6
+  channels: [64, 128, 256]
+  blocks_per_stage: 2
+  strides: [1, 2, 2]
+  stem_channels: 64
+  kernel_size: 3
+  tcn_channels: 128
+  tcn_blocks: 4
+  tcn_kernel_size: 3
+  tcn_dilations: [1, 2, 4, 8]
+  dropout: 0.2
+  causal: true
+
+data:
+  val_ratio: 0.2
+
+training:
+  epochs: 30
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 0.0001
+  lr_factor: 0.5
+  lr_patience: 5
+
+seed: 42

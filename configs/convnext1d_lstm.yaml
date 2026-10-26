@@ -1,0 +1,27 @@
+# ConvNeXt1D-LSTM training config (DESIGN.md §3.3.6, §4).
+
+model_name: convnext1d_lstm
+
+model_params:
+  in_channels: 9
+  num_classes: 6
+  dims: [64, 128, 256]
+  blocks_per_stage: [2, 2, 2]
+  kernel_size: 7
+  expansion: 4
+  hidden_size: 128
+  num_layers: 2
+  dropout: 0.2
+
+data:
+  val_ratio: 0.2
+
+training:
+  epochs: 30
+  batch_size: 64
+  lr: 0.001
+  weight_decay: 0.0001
+  lr_factor: 0.5
+  lr_patience: 5
+
+seed: 42
