@@ -80,6 +80,10 @@ def load_raw_signals(dataset_dir):
 def split_train_val_by_subject(subjects, val_ratio=0.2, seed=42):
     """Split train indices into train/val, grouped by participant (DESIGN.md §2.3).
 
+    ``seed`` is the *data-split* seed and should stay fixed across model seeds,
+    otherwise seed-to-seed differences mix model randomness with a different
+    validation-subject set.
+
     Returns ``(train_idx, val_idx, val_subjects)`` so no participant appears in
     both splits.
     """
@@ -92,6 +96,34 @@ def split_train_val_by_subject(subjects, val_ratio=0.2, seed=42):
     val_idx = np.where(val_mask)[0]
     train_idx = np.where(~val_mask)[0]
     return train_idx, val_idx, val_subjects
+
+
+def stratified_subsample_indices(y, fraction, seed=42):
+    """Return class-stratified training indices for the small-sample study.
+
+    ``fraction`` is applied *per class*, so every activity keeps the same
+    relative representation. Subsets are **nested** across fractions: for a
+    fixed ``seed`` the 10% indices are a subset of the 25% indices, which are a
+    subset of the 50% indices. This removes "which windows were drawn" as a
+    confound when comparing fractions.
+
+    ``seed`` should be fixed across model seeds (see ``build_dataloaders``).
+    """
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"train_fraction must be in (0, 1], got {fraction}")
+    y = np.asarray(y)
+    if fraction == 1.0:
+        return np.arange(len(y))
+
+    rng = np.random.default_rng(seed)
+    selected = []
+    for cls in np.unique(y):
+        cls_idx = np.where(y == cls)[0]
+        # Draw one permutation per class; take a prefix so subsets nest.
+        order = rng.permutation(cls_idx)
+        n = max(1, int(round(len(cls_idx) * fraction)))
+        selected.append(order[: min(n, len(cls_idx))])
+    return np.sort(np.concatenate(selected))
 
 
 class HARDataset(Dataset):
@@ -112,15 +144,40 @@ def build_dataloaders(
     dataset_dir,
     val_ratio=0.2,
     batch_size=64,
-    seed=42,
+    split_seed=42,
+    subset_seed=42,
+    train_fraction=1.0,
     num_workers=0,
 ):
-    """Build train/val/test DataLoaders with a subject-grouped validation split."""
+    """Build train/val/test DataLoaders with a subject-grouped validation split.
+
+    Seeds are deliberately separate:
+
+    * ``split_seed`` fixes the participant-grouped train/val split;
+    * ``subset_seed`` fixes which windows form the small-sample training subset;
+    * the *model* seed is applied by the caller (``set_seed``) and controls
+      weight initialisation, dropout and batch order only.
+
+    Keeping the two data seeds fixed across model seeds means the reported
+    mean/std across seeds measures training stochasticity, not a different data
+    split. The small-sample subsets are class-stratified and nested across
+    fractions (see ``stratified_subsample_indices``).
+    """
+    if not 0.0 < train_fraction <= 1.0:
+        raise ValueError(f"train_fraction must be in (0, 1], got {train_fraction}")
+
     data = load_raw_signals(dataset_dir)
 
     train_idx, val_idx, val_subjects = split_train_val_by_subject(
-        data["subject_train"], val_ratio=val_ratio, seed=seed
+        data["subject_train"], val_ratio=val_ratio, seed=split_seed
     )
+
+    num_train_full = len(train_idx)
+    if train_fraction < 1.0:
+        sub = stratified_subsample_indices(
+            data["y_train"][train_idx], train_fraction, seed=subset_seed
+        )
+        train_idx = train_idx[sub]
 
     train_ds = HARDataset(data["x_train"][train_idx], data["y_train"][train_idx])
     val_ds = HARDataset(data["x_train"][val_idx], data["y_train"][val_idx])
@@ -134,7 +191,19 @@ def build_dataloaders(
 
     return {
         "loaders": loaders,
-        "val_subjects": val_subjects.tolist(),
+        "data_split": {
+            "val_ratio": val_ratio,
+            "split_seed": split_seed,
+            "subset_seed": subset_seed,
+            "train_fraction": train_fraction,
+            "train_subjects": np.unique(data["subject_train"][train_idx]).tolist(),
+            "val_subjects": np.sort(val_subjects).tolist(),
+            "num_train_full": num_train_full,
+            "num_train": len(train_ds),
+            "num_val": len(val_ds),
+            "num_test": len(test_ds),
+        },
+        "val_subjects": np.sort(val_subjects).tolist(),
         "num_train": len(train_ds),
         "num_val": len(val_ds),
         "num_test": len(test_ds),

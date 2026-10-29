@@ -13,6 +13,8 @@ model_params:
 
 data:
   val_ratio: 0.2
+  split_seed: 42   # data-split seed; keep fixed across model seeds
+  subset_seed: 42  # small-sample subset seed; keep fixed across model seeds
 
 training:
   epochs: 30

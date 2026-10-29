@@ -30,7 +30,11 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Train and evaluate a HAR model.")
     parser.add_argument("--config", default="configs/cnn1d.yaml")
     parser.add_argument("--model", default=None, help="override model_name in config")
-    parser.add_argument("--seed", type=int, default=None)
+    parser.add_argument("--seed", type=int, default=None, help="model seed")
+    parser.add_argument("--split-seed", type=int, default=None, help="participant-split seed")
+    parser.add_argument("--subset-seed", type=int, default=None, help="small-sample subset seed")
+    parser.add_argument("--train-fraction", type=float, default=None, help="fraction of training windows (0,1]")
+    parser.add_argument("--tag-suffix", default="", help="suffix appended to result/checkpoint names")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
@@ -57,8 +61,25 @@ def main():
     if args.lr is not None:
         training["lr"] = args.lr
 
+    data_cfg = cfg.get("data", {})
+
+    # Model seed and data seeds are deliberately independent: the train/val
+    # participant split (and the small-sample subset) stay fixed across the
+    # three model seeds, so seed-to-seed variance reflects training
+    # stochasticity rather than a different validation-subject set.
     seed = args.seed if args.seed is not None else cfg.get("seed", 42)
-    val_ratio = args.val_ratio if args.val_ratio is not None else cfg.get("data", {}).get("val_ratio", 0.2)
+    split_seed = (
+        args.split_seed if args.split_seed is not None else data_cfg.get("split_seed", 42)
+    )
+    subset_seed = (
+        args.subset_seed if args.subset_seed is not None else data_cfg.get("subset_seed", split_seed)
+    )
+    train_fraction = (
+        args.train_fraction
+        if args.train_fraction is not None
+        else data_cfg.get("train_fraction", 1.0)
+    )
+    val_ratio = args.val_ratio if args.val_ratio is not None else data_cfg.get("val_ratio", 0.2)
     batch_size = training.get("batch_size", 64)
 
     set_seed(seed)
@@ -70,11 +91,15 @@ def main():
         data_dir,
         val_ratio=val_ratio,
         batch_size=batch_size,
-        seed=seed,
+        split_seed=split_seed,
+        subset_seed=subset_seed,
+        train_fraction=train_fraction,
     )
     loaders = split["loaders"]
     print(
-        f"Data: train={split['num_train']} val={split['num_val']} test={split['num_test']} | "
+        f"Data: fraction={train_fraction:g} train={split['num_train']}/{split['data_split']['num_train_full']} "
+        f"val={split['num_val']} test={split['num_test']} | "
+        f"split_seed={split_seed} subset_seed={subset_seed} | "
         f"val_subjects={split['val_subjects']} | device={device}"
     )
 
@@ -87,10 +112,19 @@ def main():
     run_cfg = {
         "model_name": model_name,
         "model_params": model_params,
-        "data": cfg.get("data", {}),
+        "data": {
+            **data_cfg,
+            "val_ratio": val_ratio,
+            "split_seed": split_seed,
+            "subset_seed": subset_seed,
+            "train_fraction": train_fraction,
+        },
+        "seed": seed,
         **training,
     }
-    ckpt_path = Path(args.checkpoint_dir) / f"{model_name}_seed{seed}_best.pt"
+    resolved_cfg = {**cfg, "model_name": model_name, "seed": seed, "data": run_cfg["data"]}
+    tag = f"{model_name}_seed{seed}{args.tag_suffix}"
+    ckpt_path = Path(args.checkpoint_dir) / f"{tag}_best.pt"
     result = train_model(
         model,
         loaders["train"],
@@ -107,7 +141,7 @@ def main():
     test_metrics = evaluate(model, loaders["test"], device)
 
     # ---- resource efficiency ----
-    size_path = Path(args.checkpoint_dir) / f"{model_name}_seed{seed}_weights.pt"
+    size_path = Path(args.checkpoint_dir) / f"{tag}_weights.pt"
     size_bytes = benchmark.model_size_bytes(model, size_path)
     latency = benchmark.measure_cpu_latency(model)
     bench = {
@@ -118,11 +152,14 @@ def main():
 
     # ---- save results ----
     results_dir = Path(args.results_dir)
-    tag = f"{model_name}_seed{seed}"
     summary = {
         "model_name": model_name,
         "seed": seed,
-        "config": cfg,
+        "split_seed": split_seed,
+        "subset_seed": subset_seed,
+        "train_fraction": train_fraction,
+        "config": resolved_cfg,
+        "data_split": split["data_split"],
         "val_subjects": split["val_subjects"],
         "best_epoch": result["best_epoch"],
         "best_val_metrics": result["best_val_metrics"],

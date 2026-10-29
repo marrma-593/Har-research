@@ -2,10 +2,13 @@
 
 # model weights (large binaries)
 /checkpoints/*.pt
+/checkpoints/**/*.pt
 
 # generated result artifacts
 /results/*.json
 /results/*.txt
+/results/**/*
+
 
 # training logs
 /logs/
